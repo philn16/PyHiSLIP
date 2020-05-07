@@ -9,6 +9,9 @@ import select,os
 from pyhislip import HiSLIP
 from cVXI11 import Vxi11Device
 from PyUSBTMC import USB488_device
+from logging import info,warn,debug, error
+import logging
+logging.getLogger().setLevel(logging.DEBUG)
 
 class PWR(HiSLIP):
     """
@@ -30,8 +33,6 @@ class PWR(HiSLIP):
         self.po.register(self.async_channel, select.POLLIN | select.POLLPRI)
         self.fd2chan=dict(((self.sync_channel.fileno(),  self.sync_channel),
                            (self.async_channel.fileno(), self.async_channel)))
-        self.sync_poll=select.poll()
-        self.sync_poll.register(self.sync_channel, select.POLLIN | select.POLLPRI)
         try:
             self.vdev=Vxi11Device(host.encode(),b"inst0")
         except:
@@ -40,11 +41,6 @@ class PWR(HiSLIP):
     def write(self, data):
         super(PWR, self).write(data)
         return self.most_recent_message_id
-    
-    def _wait_for_answer(self):# override
-        res=self.sync_poll.poll(self.LOCK_TIMEOUT)
-        #print (res)
-        return res
     
     def poll(self):
         return self.po.poll(self.SOCKET_TIMEOUT)
@@ -105,20 +101,28 @@ def test_SRQ(dev):
     dev.write("*SRE 32")
     dev.write("*ESE 1")
     #dev.write("TRIG:TRAN") # ' ソフトウェアトリガを与える
+    def callback(dev=dev):
+        time.sleep(0.0)
+        dev.release_srq_lock()
+        
+    if not dev.srq_lock.locked():
+        dev.srq_lock.acquire()
+    dev.start_SRQ_thread(callback=callback)
+    s=time.time()
+    print("thread status1:",dev.srq_thread.is_alive())
     dev.write("*CLS;*TRG;*OPC;")
-    #print("wait for SRQ from asyn_channel",dev.poll())
-    msg=dev.read_waiting()
-    while not msg:
-        time.sleep(0.001)
-        print(dev.poll())
-        msg=dev.read_waiting()
-    print(msg, dev.status_query())
+    print("thread status2:",dev.srq_thread.is_alive())
+    #dev.srq_lock.acquire()
+    dev.srq_thread.join()
+    e=time.time()-s
+    print("thread status3:",dev.srq_thread.is_alive(),e)
+    print(dev.status_query())
     while  [s for s,m in dev.poll() if (m & (~select.POLLOUT &0xff))]:
-        print("resp",self.read_waiting())
+        print("resp",dev.read_waiting())
     print("*SRE",dev.ask("*SRE?"))
     dev.write("*CLS;"); print("*ESR",dev.ask("*ESR?"), dev.status_query())
     dev.write("*CLS;"); print("*STB", dev.ask("*STB?"),dev.status_query())
-    return msg
+    return 
 
 def test_lock(dev):
     print("lock/rerease test\n")
@@ -201,4 +205,3 @@ def main():
     
 if __name__ == "__main__":
     main()
-    
