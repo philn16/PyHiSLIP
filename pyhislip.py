@@ -16,6 +16,9 @@ from time import sleep
 
 from collections import OrderedDict
 from select import poll, POLLIN, POLLPRI
+import threading
+from logging import warn,debug,info,error
+
 
 class HiSLIPFatalError(Exception):
     '''
@@ -339,16 +342,16 @@ class _HiSLIP(object):
 
         # Check if message is Fatal Error or Error
         if header['message_type'] == self.message_types['FatalError']:
-            print(data)
+            debug(data)
             self._raise_fatal_error(header['control_code'])
         elif header['message_type'] == self.message_types['Error']:
-            print(data)
+            debug(data)
             self._raise_error(header['control_code'])
 
         # Check if message type is expected
         if expected_message_type != -1:
             if header['message_type'] != expected_message_type:
-                print('Unexpectable message type!')
+                warn('Unexpectable message type!')
                 self._raise_fatal_error(0, 1)
 
     def _get_message_parameter(self, raw_message_parameter, message_type):
@@ -374,7 +377,7 @@ class _HiSLIP(object):
         check it and decode
         '''
         if message_type == self.message_types['AsyncMaximumMessageSizeResponse']:
-            data = str(struct.unpack('!q', raw_data)[0])
+            data = str(struct.unpack('>q', raw_data)[0])
         else:
             data = raw_data.decode()
         return data
@@ -416,6 +419,7 @@ class HiSLIP(_HiSLIP):
 
     def __init__(self):
         super(HiSLIP, self).__init__()
+        self.srq_lock=threading.Lock()
 
     def _read_hislip_message(self, sock, expected_message_type=-1):
         '''
@@ -439,7 +443,7 @@ class HiSLIP(_HiSLIP):
 
     def _add_new_line(self, data):
         ''' If sending data doesn't have '\n' in the end, add it '''
-        if data[len(data) - 1] != '\n':
+        if data[ - 1] != '\n':
             data = data + '\n'
 
         return data
@@ -499,38 +503,43 @@ class HiSLIP(_HiSLIP):
         '''  This method set maximal available message size '''
 
         # Create message and send it through async channel
-        message = self._create_hislip_message(self.message_types['AsyncMaximumMessageSize'], 0, 0, struct.pack('!q', message_size))
+        message = self._create_hislip_message(
+            self.message_types['AsyncMaximumMessageSize'],
+            0, 0,
+            struct.pack('>q', message_size)
+        )
         self.async_channel.send(message)
 
-        data = self._read_hislip_message(self.async_channel, self.message_types['AsyncMaximumMessageSizeResponse'])[1]
+        data = self._read_hislip_message(
+            self.async_channel,
+            self.message_types['AsyncMaximumMessageSizeResponse']
+        )[1]
 
         self.MAXIMUM_MESSAGE_SIZE = min(message_size, int(data))
 
     def status_query(self):
         ''' try to read MAV and status byte'''
 
-        message = self._create_hislip_message(self.message_types['AsyncStatusQuery'], self.rmt_delivered, self.most_recent_message_id)
+        message = self._create_hislip_message(
+            self.message_types['AsyncStatusQuery'],
+            self.rmt_delivered,
+            self.most_recent_message_id)
 
         self.async_channel.send(message)
 
-        header = self._read_hislip_message(self.async_channel, self.message_types['AsyncStatusResponse'])[0]
-
+        header = self._read_hislip_message(
+            self.async_channel,
+            self.message_types['AsyncStatusResponse']
+        )[0]
         status = header['control_code']
-        
-        # bin_status = str(bin(int(status)))[2:]
-
-        # if len(bin_status) >= 5:
-        #     mav = int(bin_status[len(bin_status) - 5])
-        # else:
-        #     mav = 0
         status &= 0xff # a contro_code is one byte data.
         mav = status & 0x10 # select bit 4
         #print "status:",mav,status
         return mav, status
 
-    def _wait_for_answer(self):
+    def _wait_for_answer(self, wait_time):
         ''' wait reply from server'''
-        res=self.sync_poll.poll(self.LOCK_TIMEOUT)
+        res=self.sync_poll.poll(wait_time)
         return res
 
     def increment_message_id(self):#3.1.2 Synchronized Mode Client Requirements
@@ -563,14 +572,14 @@ class HiSLIP(_HiSLIP):
 
             self.increment_message_id()
 
-    def ask(self, data_str):
+    def ask(self, data_str, wait_time = 3000):
         ''' Method send query to server and read answer '''
 
         # send request
         self.write(data_str)
 
         # we should wait till the time when information from device will be ready.
-        self._wait_for_answer()
+        self._wait_for_answer(wait_time)
 
         # read and analyze answer
         full_data = str()
@@ -694,3 +703,31 @@ class HiSLIP(_HiSLIP):
         result = header['control_code']
 
         return result
+
+    def release_srq_lock(self):
+        debug( "releasing srq lock:{}".format(self.srq_lock.locked()))
+        if self.srq_lock.locked():
+            self.srq_lock.release()
+        debug( "released srq lock:{}".format(self.srq_lock.locked()))
+            
+    def wait_for_SRQ(self,callback):
+        self.async_poll.poll(None) # None: wait forever
+        header = self._read_hislip_message(
+            self.async_channel,
+            self.message_types['AsyncServiceRequest']
+        )[0]
+        callback()
+        debug("SRQ lock released {}".format(header))
+        return
+    
+    def start_SRQ_thread(self, callback=None):
+        if not callback:
+            callback=self.release_srq_lock
+        self.srq_thread=threading.Thread(
+            name="SRQ_wait",
+            target=self.wait_for_SRQ,
+            args=(callback,)
+        )
+        self.srq_thread.start()
+        debug("SRQ watcher")
+        
