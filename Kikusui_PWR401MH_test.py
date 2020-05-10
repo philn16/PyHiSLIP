@@ -4,7 +4,7 @@
 
 """
 
-import select,os
+import select,os,sys
 
 from pyhislip import HiSLIP
 from cVXI11 import Vxi11Device
@@ -80,6 +80,7 @@ def test(host="192.168.2.5"):
     dev=PWR(host)
     dev.set_max_message_size(1024)
     print("actual maximum message size is:",dev.MAXIMUM_MESSAGE_SIZE)
+    sys.stdout.flush()
     print("Overlap_mode:",dev.overlap_mode)
     dev.device_clear()
     print("Overlap_mode after_device clear:",dev.overlap_mode)
@@ -102,11 +103,7 @@ def test_SRQ(dev):
     dev.write("*ESE 1")
     #dev.write("TRIG:TRAN") # ' ソフトウェアトリガを与える
     def callback(dev=dev):
-        time.sleep(0.0)
-        dev.release_srq_lock()
-        
-    if not dev.srq_lock.locked():
-        dev.srq_lock.acquire()
+        time.sleep(1.0)
     dev.start_SRQ_thread(callback=callback)
     s=time.time()
     print("thread status1:",dev.srq_thread.is_alive())
@@ -115,13 +112,13 @@ def test_SRQ(dev):
     #dev.srq_lock.acquire()
     dev.srq_thread.join()
     e=time.time()-s
-    print("thread status3:",dev.srq_thread.is_alive(),e)
+    print("thread status3: alive:{} dt:{:.3f} sec".format(dev.srq_thread.is_alive(),e))
     print(dev.status_query())
     while  [s for s,m in dev.poll() if (m & (~select.POLLOUT &0xff))]:
         print("resp",dev.read_waiting())
     print("*SRE",dev.ask("*SRE?"))
-    dev.write("*CLS;"); print("*ESR",dev.ask("*ESR?"), dev.status_query())
-    dev.write("*CLS;"); print("*STB", dev.ask("*STB?"),dev.status_query())
+    dev.write("*CLS;"); print("*STB", dev.ask("*STB?"), dev.status_query())
+    dev.write("*CLS;"); print("*ESR", dev.ask("*ESR?"), dev.status_query())
     return 
 
 def test_lock(dev):
@@ -193,8 +190,8 @@ def test_multi_response_vxi11(dev):
     dev.write("*IDN?;*STB?")
     print("response:",dev.read())
 
-def main():
-    dev=test()
+def main(host="192.168.2.5"):
+    dev=test(host)
     test_lock(dev)
     test_multi_response(dev)
     test_SRQ(dev)
@@ -204,4 +201,4 @@ def main():
     test_lock(dev)
     
 if __name__ == "__main__":
-    main()
+    main("169.254.100.192")

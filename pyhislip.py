@@ -43,6 +43,8 @@ class _HiSLIP(object):
     This class is abstract and content main methods and attributes for HiSLIP protocol
     '''
     # class constants.
+    _Default_Port=4880  # HiSLIP default port number
+    
     # Maximum supported protocol version
     _PROTOCOL_VERSION_MAX = 257  # <major><minor> = <1><1> that is 257
     _INITIAL_MESSAGE_ID = 0xffffff00
@@ -210,7 +212,8 @@ class _HiSLIP(object):
     def _read_socket(self, sock):
         ''' This method organize reciver of messages by socket TCP connection '''
 
-        data = str().encode()
+        #data = str().encode()
+        data = ""
         while True:
             try:
                 sock.settimeout(self.SOCKET_TIMEOUT)
@@ -218,63 +221,7 @@ class _HiSLIP(object):
                 data = data + current_data
             except socket.timeout:
                 break
-
         return data
-
-    def _raise_fatal_error(self, error_code, source=0):
-        '''
-        Raise HiSLIPFatalError exception.
-
-        Attributes:
-            error code: error code following HiSLIP fatal error codes
-            source: this parameter shows, was exception raised on client or server side. In case if
-                    client is source of fatal error, send FatalError Transaction server
-        '''
-
-        error_message = 'HiSLIP Fatal Error!'
-        error_expression = self.fatal_error_codes[error_code]
-
-        if source == 1:
-            self._send_fatal_error_to_server(error_code)
-
-        raise HiSLIPFatalError(error_message, error_expression)
-
-    def _send_fatal_error_to_server(self, error_code):
-        message = self._create_hislip_message(self.message_types['FatalError'], error_code)
-        self.sync_channel.send(message)
-        try:
-            peer=self.sync_channel.getpeername()
-            self.sync_channel.close()
-            self.async_channel.close()
-            # reconnect to server
-            self.connect(peer[0])
-        except NameError:
-            pass
-
-    def _raise_error(self, error_code, source=0):
-        '''
-        Raise HiSLIPError exception.
-
-        Attributes:
-            error code: error code following HiSLIP error codes
-            source: this parameter shows, was exception raised on client or server side. In case if
-                    client is source of fatal error, send FatalError Transaction server
-        '''
-
-        error_message = 'HiSLIP Error!'
-        error_expression = self.error_codes[error_code]
-
-        if source == 1:
-            self._send_error_to_server(error_code)
-
-        raise HiSLIPError(error_message, error_expression)
-
-    def _send_error_to_server(self, error_code):
-        message = self._create_hislip_message(self.message_types['Error'], error_code)
-        self.sync_channel.send(message)
-        # self.sync_channel.close()
-        # self.async_channel.close()
-        raise TypeError('Error with code ' + str(error_code))
 
     def _split_hislip_header(self, header, expected_message_type=-1):
         '''
@@ -429,6 +376,61 @@ class HiSLIP(_HiSLIP):
         self.rmt_delivered = self._RMT_delivered(header['message_type'], data)
         return header, data
 
+    def _raise_fatal_error(self, error_code, source=0):
+        '''
+        Raise HiSLIPFatalError exception.
+
+        Attributes:
+            error code: error code following HiSLIP fatal error codes
+            source: this parameter shows, was exception raised on client or server side. In case if
+                    client is source of fatal error, send FatalError Transaction server
+        '''
+
+        error_message = 'HiSLIP Fatal Error!'
+        error_expression = self.fatal_error_codes[error_code]
+
+        if source == 1:
+            self._send_fatal_error_to_server(error_code)
+
+        raise HiSLIPFatalError(error_message, error_expression)
+
+    def _send_fatal_error_to_server(self, error_code):
+        message = self._create_hislip_message(self.message_types['FatalError'], error_code)
+        self.sync_channel.send(message)
+        try:
+            peer=self.sync_channel.getpeername()
+            self.sync_channel.close()
+            self.async_channel.close()
+            # reconnect to server
+            self.connect(peer[0])
+        except NameError:
+            pass
+
+    def _raise_error(self, error_code, source=0):
+        '''
+        Raise HiSLIPError exception.
+
+        Attributes:
+            error code: error code following HiSLIP error codes
+            source: this parameter shows, was exception raised on client or server side. In case if
+                    client is source of fatal error, send FatalError Transaction server
+        '''
+
+        error_message = 'HiSLIP Error!'
+        error_expression = self.error_codes[error_code]
+
+        if source == 1:
+            self._send_error_to_server(error_code)
+
+        raise HiSLIPError(error_message, error_expression)
+
+    def _send_error_to_server(self, error_code):
+        message = self._create_hislip_message(self.message_types['Error'], error_code)
+        self.sync_channel.send(message)
+        # self.sync_channel.close()
+        # self.async_channel.close()
+        raise TypeError('Error with code ' + str(error_code))
+
     def _RMT_delivered(self, message_type, data):
         '''
         Set RMT-delivered if delivered RMT
@@ -448,7 +450,7 @@ class HiSLIP(_HiSLIP):
 
         return data
 
-    def connect(self, ip, sub_adress='hislip0', port=4880, vendor_id='ZL'):
+    def connect(self, ip, sub_adress='hislip0', port=_HiSLIP._Default_Port, vendor_id='ZL'):
         '''
         This method tries initialize connection to HiSLIP server, based on input parameters
         '''
@@ -716,13 +718,15 @@ class HiSLIP(_HiSLIP):
             self.async_channel,
             self.message_types['AsyncServiceRequest']
         )[0]
-        callback()
+        if callback:
+            callback()
+        self.release_srq_lock()
         debug("SRQ lock released {}".format(header))
         return
     
     def start_SRQ_thread(self, callback=None):
-        if not callback:
-            callback=self.release_srq_lock
+        if not self.srq_lock.locked():
+            self.srq_lock.acquire()
         self.srq_thread=threading.Thread(
             name="SRQ_wait",
             target=self.wait_for_SRQ,
