@@ -4,7 +4,7 @@
 
 """
 
-import select,os
+import select,os,sys
 
 from pyhislip import HiSLIP
 from cVXI11 import Vxi11Device
@@ -80,6 +80,7 @@ def test(host="192.168.2.5"):
     dev=PWR(host)
     dev.set_max_message_size(1024)
     print("actual maximum message size is:",dev.MAXIMUM_MESSAGE_SIZE)
+    sys.stdout.flush()
     print("Overlap_mode:",dev.overlap_mode)
     dev.device_clear()
     print("Overlap_mode after_device clear:",dev.overlap_mode)
@@ -100,13 +101,9 @@ def test_SRQ(dev):
     print("*SRE:", dev.ask("*SRE?"), dev.status_query())
     dev.write("*SRE 32")
     dev.write("*ESE 1")
-    def callback(msg, dev=dev):
+    #dev.write("TRIG:TRAN") # ' ソフトウェアトリガを与える
+    def callback(dev=dev):
         time.sleep(1.0)
-        info(msg)
-        dev.release_srq_lock(msg)
-    
-    if not dev.srq_lock.locked():
-        dev.srq_lock.acquire()
     dev.start_SRQ_thread(callback=callback)
     s=time.time()
     print("thread status1:",dev.srq_thread.is_alive())
@@ -122,8 +119,8 @@ def test_SRQ(dev):
     while  [s for s,m in dev.poll() if (m & (~select.POLLOUT &0xff))]:
         print("resp",dev.read_waiting())
     print("*SRE",dev.ask("*SRE?"))
-    dev.write("*CLS;"); print("*ESR",dev.ask("*ESR?"), dev.status_query())
-    dev.write("*CLS;"); print("*STB", dev.ask("*STB?"),dev.status_query())
+    dev.write("*CLS;"); print("*STB", dev.ask("*STB?"), dev.status_query())
+    dev.write("*CLS;"); print("*ESR", dev.ask("*ESR?"), dev.status_query())
     return 
 
 def test_lock(dev):
@@ -195,8 +192,8 @@ def test_multi_response_vxi11(dev):
     dev.write("*IDN?;*STB?")
     print("response:",dev.read())
 
-def main():
-    dev=test()
+def main(host="192.168.2.5"):
+    dev=test(host)
     test_lock(dev)
     test_multi_response(dev)
     test_SRQ(dev)
@@ -206,4 +203,4 @@ def main():
     test_lock(dev)
     
 if __name__ == "__main__":
-    main()
+    main("169.254.100.192")
