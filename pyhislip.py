@@ -43,6 +43,7 @@ class _HiSLIP(object):
     This class is abstract and content main methods and attributes for HiSLIP protocol
     '''
     # class constants.
+    _Default_Port=4880
     # Maximum supported protocol version
     _PROTOCOL_VERSION_MAX = 257  # <major><minor> = <1><1> that is 257
     _INITIAL_MESSAGE_ID = 0xffffff00
@@ -411,6 +412,7 @@ class _HiSLIP(object):
         ''' Set timeout in seconds for client, to wait lock from server '''
         self.LOCK_TIMEOUT = timeout
 
+class HiSLIP(_HiSLIP): pass
 
 class HiSLIP(_HiSLIP):
     '''
@@ -448,7 +450,7 @@ class HiSLIP(_HiSLIP):
 
         return data
 
-    def connect(self, ip, sub_adress='hislip0', port=4880, vendor_id='ZL'):
+    def connect(self, ip, sub_adress='hislip0', port=_HiSLIP._Default_Port, vendor_id='ZL'):
         '''
         This method tries initialize connection to HiSLIP server, based on input parameters
         '''
@@ -704,21 +706,21 @@ class HiSLIP(_HiSLIP):
 
         return result
 
-    def release_srq_lock(self):
+    def release_srq_lock(self, msg):
         debug( "releasing srq lock:{}".format(self.srq_lock.locked()))
         if self.srq_lock.locked():
             self.srq_lock.release()
         debug( "released srq lock:{}".format(self.srq_lock.locked()))
             
-    def wait_for_SRQ(self,callback):
+    def wait_for_SRQ(self, callback):
         self.async_poll.poll(None) # None: wait forever
         header = self._read_hislip_message(
             self.async_channel,
             self.message_types['AsyncServiceRequest']
         )[0]
-        callback()
-        debug("SRQ lock released {}".format(header))
-        return
+        callback(header)
+        debug("SRQ lock released:{}".format(header))
+        return header
     
     def start_SRQ_thread(self, callback=None):
         if not callback:
@@ -729,5 +731,5 @@ class HiSLIP(_HiSLIP):
             args=(callback,)
         )
         self.srq_thread.start()
-        debug("SRQ watcher")
+        debug("SRQ thread started")
         

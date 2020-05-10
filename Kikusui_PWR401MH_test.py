@@ -34,7 +34,7 @@ class PWR(HiSLIP):
         self.fd2chan=dict(((self.sync_channel.fileno(),  self.sync_channel),
                            (self.async_channel.fileno(), self.async_channel)))
         try:
-            self.vdev=Vxi11Device(host.encode(),b"inst0")
+            self.vdev=Vxi11Device(host.encode(),"inst0".encode())
         except:
             pass
 
@@ -100,22 +100,24 @@ def test_SRQ(dev):
     print("*SRE:", dev.ask("*SRE?"), dev.status_query())
     dev.write("*SRE 32")
     dev.write("*ESE 1")
-    #dev.write("TRIG:TRAN") # ' ソフトウェアトリガを与える
-    def callback(dev=dev):
-        time.sleep(0.0)
-        dev.release_srq_lock()
-        
+    def callback(msg, dev=dev):
+        time.sleep(1.0)
+        info(msg)
+        dev.release_srq_lock(msg)
+    
     if not dev.srq_lock.locked():
         dev.srq_lock.acquire()
     dev.start_SRQ_thread(callback=callback)
     s=time.time()
     print("thread status1:",dev.srq_thread.is_alive())
+    #dev.write("TRIG:TRAN") # ' ソフトウェアトリガを与える
     dev.write("*CLS;*TRG;*OPC;")
     print("thread status2:",dev.srq_thread.is_alive())
     #dev.srq_lock.acquire()
-    dev.srq_thread.join()
+    r=dev.srq_thread.join()
+    print(r)
     e=time.time()-s
-    print("thread status3:",dev.srq_thread.is_alive(),e)
+    debug("thread status3: thread_alive:{} dt:{:.3f}".format(dev.srq_thread.is_alive(),e))
     print(dev.status_query())
     while  [s for s,m in dev.poll() if (m & (~select.POLLOUT &0xff))]:
         print("resp",dev.read_waiting())
@@ -153,7 +155,7 @@ def test_multi_response(dev):
     print("message ID for *IDN?:", dev.most_recent_message_id)
     dev.write("*STB?")
     print("message ID for *STB?:", dev.most_recent_message_id)
-    print("response",dev.read_waiting())
+    print("response", dev.read_waiting())
     print(dev.read_waiting())
 
     print ("write and ask")

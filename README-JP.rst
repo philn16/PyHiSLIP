@@ -1,4 +1,4 @@
-This is a reaadme in Japanese
+This is a readme in Japanese.
 
 PyHiLISPについて
 =======================
