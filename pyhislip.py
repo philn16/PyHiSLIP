@@ -44,6 +44,7 @@ class _HiSLIP(object):
     '''
     # class constants.
     _Default_Port=4880  # HiSLIP default port number
+
     
     # Maximum supported protocol version
     _PROTOCOL_VERSION_MAX = 257  # <major><minor> = <1><1> that is 257
@@ -320,11 +321,16 @@ class _HiSLIP(object):
 
     def _read_hislip_data(self, raw_data, message_type=-1):
         '''
-        Decode data. As i could mark, in all case, except AsyncMaximumMessageSizeResponse data is byte string,
-        check it and decode
+        Decode data. As i could mark, in all case, 
+        except AsyncMaximumMessageSizeResponse data is byte string,
+        check it and decode.
+        modification by Yamamoto: 
+        for Data and DataEnd, retusn Raw data for binaries in Osc.
         '''
         if message_type == self.message_types['AsyncMaximumMessageSizeResponse']:
             data = str(struct.unpack('>q', raw_data)[0])
+        elif message_type in (self.message_types['Data'],self.message_types['DataEnd']):
+            data = raw_data
         else:
             data = raw_data.decode()
         return data
@@ -358,7 +364,8 @@ class _HiSLIP(object):
         ''' Set timeout in seconds for client, to wait lock from server '''
         self.LOCK_TIMEOUT = timeout
 
-class HiSLIP(_HiSLIP): pass
+class HiSLIP(_HiSLIP):
+    pass # to access class members in the HiSLIP declaration.
 
 class HiSLIP(_HiSLIP):
     '''
@@ -451,7 +458,7 @@ class HiSLIP(_HiSLIP):
 
         return data
 
-    def connect(self, ip, sub_adress='hislip0', port=_HiSLIP._Default_Port, vendor_id='ZL'):
+    def connect(self, ip, sub_adress='hislip0', port=HiSLIP._Default_Port, vendor_id='ZL'):
         '''
         This method tries initialize connection to HiSLIP server, based on input parameters
         '''
@@ -482,11 +489,14 @@ class HiSLIP(_HiSLIP):
         self.async_channel.connect((ip, port))
 
         ''' Start the asynchronize initialization, send SessionID '''
-        message = self._create_hislip_message(self.message_types['AsyncInitialize'], 0, self.session_id)
+        message = self._create_hislip_message(
+            self.message_types['AsyncInitialize'], 0, self.session_id)
         self.async_channel.send(message)
 
         ''' Get answer from server '''
-        header = self._read_hislip_message(self.async_channel, self.message_types['AsyncInitializeResponse'])[0]
+        header = self._read_hislip_message(
+            self.async_channel,
+            self.message_types['AsyncInitializeResponse'])[0]
         self.server_vendorID=header['message_parameter']
         
         ''' Set work parameters '''
@@ -575,7 +585,7 @@ class HiSLIP(_HiSLIP):
 
             self.increment_message_id()
 
-    def ask(self, data_str, wait_time = 3000):
+    def ask(self, data_str, wait_time = 3000, reqRaw=False):
         ''' Method send query to server and read answer '''
 
         # send request
@@ -585,10 +595,15 @@ class HiSLIP(_HiSLIP):
         self._wait_for_answer(wait_time)
 
         # read and analyze answer
-        full_data = str()
+        if reqRaw:
+            full_data = b""
+        else:
+            full_data = str()
         eom = False
         while not eom:
             [header, data] = self._read_hislip_message(self.sync_channel)
+            if not reqRaw:
+                data=data.decode()
             if ((header['message_parameter'] == self.most_recent_message_id)
                 or ( not self.overlap_mode and
                      (header['message_parameter'] == self._UNKNOWN_MESSAGE_ID)
@@ -707,7 +722,7 @@ class HiSLIP(_HiSLIP):
 
         return result
 
-    def release_srq_lock(self, msg):
+    def release_srq_lock(self):
         debug( "releasing srq lock:{}".format(self.srq_lock.locked()))
         if self.srq_lock.locked():
             self.srq_lock.release()
@@ -735,4 +750,3 @@ class HiSLIP(_HiSLIP):
         )
         self.srq_thread.start()
         debug("SRQ thread started")
-        
