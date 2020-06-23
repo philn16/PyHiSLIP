@@ -329,10 +329,8 @@ class _HiSLIP(object):
         '''
         if message_type == self.message_types['AsyncMaximumMessageSizeResponse']:
             data = str(struct.unpack('>q', raw_data)[0])
-        elif message_type in (self.message_types['Data'],self.message_types['DataEnd']):
-            data = raw_data
         else:
-            data = raw_data.decode()
+            data=raw_data
         return data
 
     def _read_hislip_message(self, sock, expected_message_type=-1):
