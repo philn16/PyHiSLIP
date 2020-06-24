@@ -329,9 +329,9 @@ class _HiSLIP(object):
         '''
         if message_type == self.message_types['AsyncMaximumMessageSizeResponse']:
             data = str(struct.unpack('>q', raw_data)[0])
-        elif message_type in (self.message_types['Data'],self.message_types['DataEnd']):
+        elif message_type in (self.message_types['Data'], self.message_types['DataEnd']):
             data=raw_data
-        else:
+        else: #Error/FatalError/VendorSpecific
             data=raw_data.decode()
         return data
 
@@ -446,7 +446,8 @@ class HiSLIP(_HiSLIP):
         rmt_delivered = False
 
         if len(data) >= 1:
-            if message_type == self.message_types['DataEnd'] and data[len(data) - 1] == '\n':
+            if ( message_type == self.message_types['DataEnd']
+                 and (data[-1] in ('\n',b'\n'),ord('\n'))):
                 rmt_delivered = True
 
         return rmt_delivered
@@ -577,14 +578,45 @@ class HiSLIP(_HiSLIP):
 
         for i in range(len(data)):
             if i == len(data) - 1:
-                message = self._create_hislip_message(self.message_types['DataEnd'], self.rmt_delivered, self.message_id, data[i])
+                message = self._create_hislip_message(self.message_types['DataEnd'],
+                                                      self.rmt_delivered, self.message_id, data[i])
             else:
-                message = self._create_hislip_message(self.message_types['Data'], self.rmt_delivered, self.message_id, data[i])
+                message = self._create_hislip_message(self.message_types['Data'],
+                                                      self.rmt_delivered, self.message_id, data[i])
 
             self.sync_channel.send(message)
 
             self.increment_message_id()
 
+    def read(self,wait_time=3000,async=False):
+        if async:
+            chan=self.async_channel
+        else:
+            chan=self.sync_channel
+        full_data = b""
+        eom = False
+        while not eom:
+            [header, data] = self._read_hislip_message(self.sync_channel)
+            if ((header['message_parameter'] == self.most_recent_message_id)
+                or ( not self.overlap_mode and
+                     (header['message_parameter'] == self._UNKNOWN_MESSAGE_ID)
+                )
+            ):
+                if header['message_type'] == self.message_types['Data']:
+                    full_data = full_data + data
+                elif header['message_type'] == self.message_types['DataEnd']:
+                    full_data = full_data + data
+                    #debug("DataEnd message received.")
+                    eom = True
+                else:
+                    self._raise_error(1, 1)
+                    break
+            else:
+                #self._raise_error(1, 1)
+                break
+        return full_data
+        
+        
     def ask(self, data_str, wait_time = 3000, reqRaw=False):
         ''' Method send query to server and read answer '''
 
@@ -612,6 +644,7 @@ class HiSLIP(_HiSLIP):
                 if header['message_type'] == self.message_types['Data']:
                     full_data = full_data + data
                 elif header['message_type'] == self.message_types['DataEnd']:
+                    #debug("DataEnd message received.")
                     full_data = full_data + data
                     eom = True
                 else:
